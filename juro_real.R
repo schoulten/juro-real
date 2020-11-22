@@ -103,4 +103,4 @@ juros_real %>%
         axis.text          = element_text(size = 13, face = "bold"))
 
 
-ggsave("juro_real.jpg", units = "in", width = 7.875, height = 4.431, dpi = 1200)
+ggsave("./img/juro_real.jpg", units = "in", width = 7.875, height = 4.431, dpi = 1200)
