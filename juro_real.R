@@ -5,11 +5,11 @@
 # Feito por Fernando da Silva (GitHub: @schoulten)
 
 
-# Iremos calcular a taxa de juro real (juro nominal deflacionado pelo IPCA) por dois conceitos:
+# Iremos calcular a taxa de juro real, com base na equação de Fisher, por dois conceitos:
 
-# 1) Ex-post: deflacionamento da SELIC acumulada dos últimos 12 meses pelo IPCA do mesmo período
+# 1) Ex-post: deflacionamento da SELIC acumulada dos últimos 12 meses pelo IPCA do mesmo período;
 
-# 2) Ex-ante: deflacionamento da taxa do swap DI-Pré 360 dias pelo IPCA esperado para o mesmo período (Focus/BCB)
+# 2) Ex-ante: deflacionamento da taxa do swap DI-Pré 360 dias pelo IPCA esperado para o mesmo período (Focus/BCB);
 
 
 # Pacotes -----------------------------------------------------------------
@@ -17,23 +17,32 @@
 library(ecoseries)  # coletar dados do IPEADATA
 library(rbcb)       # coletar dados do BCB
 library(sidrar)     # coletar dados do SIDRA/IBGE
-library(tidyverse)  # família de pacotes para tratar e manipular dados
+library(tidyverse)  # família de pacotes para tratar dados
 library(ggrepel)    # pacote gráfico
 
+
+# Alternativa:
+
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load("ecoseries", "sidrar", "tidyverse", "ggrepel", "scales")
+if(!require(rbcb)) devtools::install_github("wilsonfreitas/rbcb")
 
 
 # Coletar dados -----------------------------------------------------------
 
-# Taxa do swap DI-Pré 360 dias
-dados_swap <- series_ipeadata("1900214364", periodicity = "M")$serie_1900214364
+# Parâmetros da API IPEADATA
+swap = 1900214364       # Taxa do swap DI-Pré 360 dias
+expec_inf = 1693254712  # Expectativa média de Inflação (IPCA), tx. acum. p/ os próx. 12 meses
 
 
-# Expectativa média de Inflação - IPCA - taxa acumulada para os próximos doze meses
-dados_inf_expec_m <- series_ipeadata("1693254712", periodicity = "M")$serie_1693254712
+# Coletar dados do IPEADATA
+dados_ipea <- series_ipeadata(swap, expec_inf, periodicity = c("M", "M")) %>%
+  reduce(inner_join, by = "data") %>%
+  rename(swap = valor.y, expec_inf = valor.x)
 
 
 # SELIC acumulada dos últimos 12 meses
-dados_selic_aa <- get_series(c("selic_aa" = 4189), start_date = "2001/07/01") %>%
+dados_selic <- get_series(c("selic" = 4189), start_date = min(dados_ipea$data)) %>%
   rename(data = date)
 
 
@@ -48,17 +57,16 @@ dados_ipca <- get_sidra(api = "/t/1737/n1/all/v/2265/p/all/d/v2265%202") %>%
 # Cálculo -----------------------------------------------------------------
 
 # Ex-ante
-ex_ante <- inner_join(dados_swap, dados_inf_expec_m, by = "data") %>%
-  rename(swap = valor.x, inf_expec = valor.y) %>%
-  mutate(valor = (((1+(swap/100))/(1+(inf_expec/100)))-1)*100,
+ex_ante <- dados_ipea %>%
+  mutate(valor = (((1+(swap/100))/(1+(expec_inf/100)))-1)*100,
          id    = "Ex-ante")
 
 
 # Ex-post
 ex_post <- dados_ipca %>%
-  select(data, ipca_12m = valor) %>%
-  inner_join(dados_selic_aa, by = "data") %>%
-  mutate(valor = (((1+(selic_aa/100))/(1+(ipca_12m/100)))-1)*100,
+  select(data, ipca = valor) %>%
+  inner_join(dados_selic, by = "data") %>%
+  mutate(valor = (((1+(selic/100))/(1+(ipca/100)))-1)*100,
          id    = "Ex-post")
 
 
@@ -69,6 +77,7 @@ juros_real <- bind_rows(ex_ante[c(1,4:5)], ex_post[c(1,4:5)])
 
 # Gráfico -----------------------------------------------------------------
 
+# Eu gosto de personalizar meus gráficos :)
 juros_real %>%
   ggplot(aes(x = data, y = valor, colour = id)) +
   geom_hline(yintercept = 0, size = .8, color = "gray50") +
@@ -79,12 +88,13 @@ juros_real %>%
                    nudge_x     = 50,
                    nudge_y     = 7,
                    force       = 10,
-                   size        = 5) +
+                   size        = 5,
+                   fontface = "bold") +
   labs(title    = "Taxa de juros real - Brasil",
-       subtitle = "Taxa mensal (em % a.a.)",
+       subtitle = paste0("Taxa mensal (em % a.a.)", ", dados até ", format(tail(juros_real$data, 1), "%b/%Y")),
        x        = "",
        y        = NULL,
-       caption  = "Fonte: GECE/FURG com dados de B3, BCB e IBGE") +
+       caption  = "Fonte: B3, BCB e IBGE") +
   scale_color_manual(values = c("#233f91", "red4")) +
   scale_x_date(breaks = "2 years", date_labels = "%Y") +
   scale_y_continuous(labels = scales::label_percent(scale = 1, accuracy = 1)) +
@@ -103,4 +113,5 @@ juros_real %>%
         axis.text          = element_text(size = 13, face = "bold"))
 
 
+# Salvar imagem
 ggsave("./img/juro_real.jpg", units = "in", width = 7.875, height = 4.431, dpi = 1200)
